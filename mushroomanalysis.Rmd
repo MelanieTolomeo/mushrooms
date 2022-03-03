@@ -1,0 +1,226 @@
+---
+title: "MelanieTolomeoFinalProjectDataMining"
+author: "Melanie Tolomeo"
+date: "12/14/2021"
+output: word_document
+---
+# Introduction
+I chose the "mushrooms" data-set (https://www.kaggle.com/uciml/mushroom-classification), with 8,124 records, each representing a different mushroom. The dataset has 23 datapoints, including 22 attributes of the mushroom and "class" which a variable that states whether it is poisonous.
+
+# Research Question
+My research question is, "Is it possible to know if a mushroom is poisonous based on its coloring?" Coloring includes cap color, gill color, stalk/stem color, coloring above ring (a.k.a. "veil remnant"), coloring below ring/veil remnant, and spore colors.
+
+This doesn't have too many practical applications in modern society, but if one was stuck in the wilderness they might be able to know if a mushroom was poisonous based on coloring.
+
+![anatomy of a mushroom](https://image.shutterstock.com/image-vector/illustration-biology-anatomy-mushroom-diagram-600w-1446426248.jpg)
+
+
+# Data Cleanup
+First, let's the data. The data is fairly clean already, but I recoded the variables into understandable and removed any variables that were not colors.
+
+```{r}
+library(tidymodels)
+library(janitor)
+setwd('/Users/melanietolomeo/Desktop/School/Data Mining')
+mushrooms_full <- read.csv('mushrooms.csv')
+mushrooms_color <- mushrooms_full %>%
+  clean_names() %>%
+  select(contains('color'),class) %>%
+  mutate(class=recode_factor(class,"p"="poisonous","e"="not poisonous"),
+         cap_color=recode_factor(cap_color,"n"="brown","b"="buff","c"="cinnamon",
+                                 "g"="gray","r"="green","p"="pink","u"="purple",
+                                 "e"="red","w"="white","y"="yellow"),
+         gill_color=recode_factor(gill_color,"k"="black","n"="brown","b"="buff",
+             "h"="chocolate","g"="gray","r"="green","o"="orange","p"="pink",
+             "u"="purple","e"="red","w"="white","y"="yellow"),
+         stalk_color_above_ring=recode_factor(stalk_color_above_ring,"n"="brown","b"="buff","c"="cinnamon","g"="gray","o"="orange","p"="pink","e"="red","w"="white","y"="yellow"),
+         stalk_color_below_ring=recode_factor(stalk_color_below_ring,"n"="brown","b"="buff","c"="cinnamon","g"="gray","o"="orange","p"="pink","e"="red","w"="white","y"="yellow"),
+         veil_color=recode_factor(veil_color,"n"="brown","o"="orange","w"="white","y"="yellow"),
+         spore_print_color=recode_factor(spore_print_color,"k"="black","n"="brown","b"="buff","h"="chocolate","r"="green","o"="orange","u"="purple","w"="white","y"="yellow"))
+
+
+```
+# Exploratory Data Analysis
+Next, we'll look at some visualizations and figure out which variables are significant.
+
+## Visualizations
+```{r}
+
+mushrooms_color %>% ggplot(aes(x=cap_color)) +geom_bar(aes(fill=class))
+mushrooms_color %>% ggplot(aes(x=gill_color)) +geom_bar(aes(fill=class))
+mushrooms_color %>% ggplot(aes(x=stalk_color_above_ring))+geom_bar(aes(fill=class))
+mushrooms_color %>% ggplot(aes(x=stalk_color_below_ring)) +geom_bar(aes(fill=class))
+mushrooms_color %>% ggplot(aes(x=veil_color)) +geom_bar(aes(fill=class))
+mushrooms_color %>% ggplot(aes(x=spore_print_color)) +geom_bar(aes(fill=class))
+
+```
+From the visualizations, it looks like certain colors are highly correlated with a mushroom being poisonous. For instance, mushrooms with gills colored "buff" and mushrooms with spore print colored "chocolate" are very often poisonous.
+
+Spore print color seems to be an excellent predictor. However, spores need to be extracted through a spore print so this is not a reliable indicator at first glance. Let's remove that variable from the model.
+
+```{r}
+mushrooms_color_new <- mushrooms_color %>% select(-spore_print_color)
+```
+
+
+
+# Decision Tree
+
+Next,let's build a decision tree model. We will build decision trees with two different cp's (complexity parameters) and compare their metrics.
+```{r}
+#Split the Data
+library(rpart)
+
+set.seed(123)
+mushrooms_split<-initial_split(mushrooms_color_new,prop=0.7,strata=class)
+mushrooms_train<-training(mushrooms_split)
+mushrooms_test<-testing(mushrooms_split)
+
+library(rpart)
+library(rpart.plot)
+library(rattle)
+
+my_tree01 <- rpart(class~cap_color+
+                     gill_color+
+                     stalk_color_above_ring+
+                     stalk_color_below_ring+
+                     veil_color,
+                   data=mushrooms_train,method="class",minsplit=2,minbucket=1,cp=0.01)
+
+my_tree005 <- rpart(class~cap_color+
+                     gill_color+
+                     stalk_color_above_ring+
+                     stalk_color_below_ring+
+                     veil_color,
+                    data=mushrooms_train,method="class",minsplit=2,minbucket=1,cp=0.005)
+
+fancyRpartPlot(my_tree01,caption=".01cp")
+fancyRpartPlot(my_tree005,caption=".005cp")
+```
+
+To read this, we start at the top and travel down like a flow chart. In the cp=.01 model, if "gill color" is not black, brown, orange, pink, purple, red, white or yellow and cap color is green, purple, or white, there is a 24% chance of the mushroom being poisonous.
+
+
+```{r}
+
+test_01_training <- predict(my_tree01, mushrooms_train, type="class")
+test_005_training <- predict(my_tree005, mushrooms_train, type="class")
+
+test_01_testing <- predict(my_tree01, mushrooms_test, type="class")
+test_005_testing <- predict(my_tree005, mushrooms_test, type="class")
+
+library(caret)
+
+print(".01 Training")
+confusionMatrix(test_01_training,mushrooms_train$class,positive='poisonous')
+print(".01 Testing")
+confusionMatrix(test_01_testing,mushrooms_test$class,positive='poisonous')
+
+print(".005 Training")
+confusionMatrix(test_005_training,mushrooms_train$class,positive='poisonous')
+print(".005 Testing")
+confusionMatrix(test_005_testing,mushrooms_test$class,positive='poisonous')
+
+```
+Both the .01 and .005 cp have high metrics. However,they both show overfitting - for instance, the accuracy for the training data set is higher than the testing data set at both cp's.
+
+Both models also have similar metrics for sensitivity, or true positive rate, which is the metric we would like to optimize for. Therefore, either model is acceptable.
+
+
+# KNN
+
+Let's build a model that predicts whether a mushroom is poisonous based on the class of the most similar mushrooms (K-nearest neighbor).
+
+First, let's build the tuning procedure for the k nearest neighbor model.
+
+```{r}
+library(kknn)
+#Specify the sampling procedure
+k_fold<-vfold_cv(mushrooms_train, v=20, repeats =1)
+
+#Create recipe
+model_rec<-recipe(class~., mushrooms_train) %>%
+  step_dummy(all_nominal(),-all_outcomes())
+
+#Specify model
+model_spec<-nearest_neighbor(neighbors = tune("K")) %>% 
+  set_mode("classification") %>% 
+  set_engine("kknn")
+
+#Specify control grid
+model_control<-control_grid(save_pred = TRUE)
+
+#Set metrics
+model_metrics<-metric_set(roc_auc,accuracy,sens,spec)
+
+```
+
+Next, tune K in KNN model.
+```{r}
+
+set.seed(123)
+
+#tune the model
+knn_tune<-tune_grid(model_spec,
+                    model_rec,
+                    resamples = k_fold,
+                    control=model_control,
+                    grid=10,
+                    metrics = model_metrics)
+
+#collect metrics
+knn_tune %>%
+  collect_metrics()
+
+#show viz
+knn_tune %>%  
+  select(id, .metrics) %>%  
+  unnest(.metrics) %>%  
+  ggplot(aes(x=K, y=.estimate, color=id))+ 
+  geom_point()+ 
+  geom_line()+ 
+  facet_wrap(~.metric, scales = "free_y") 
+```
+
+Collect metrics.
+```{r}
+knn_pred<-knn_tune %>% collect_predictions()
+
+knn_tune %>% collect_metrics()
+
+confusionMatrix(knn_pred$class, knn_pred$.pred_class, positive="poisonous")
+```
+
+Next, we find the best k for our metric. I would like to optimize for sensitivity, or true positive rate, since that will help us know when a mushroom is poisonous so we can avoid it.
+```{r}
+best_sens <- knn_tune %>% select_best(metric="sens")
+
+best_sens
+```
+
+k=4 is the best number when optimizing for specificity, so let's run the model with that.
+
+```{r}
+
+model_final<-nearest_neighbor(neighbors = 4) %>%
+ set_mode("classification") %>%
+ set_engine("kknn")
+
+best_model<-workflow() %>%
+ add_model(model_final) %>%
+ add_recipe(model_rec)
+
+best_train<-fit(best_model, mushrooms_train) #Fitting the model
+predict_train<-predict(best_train, mushrooms_train)
+predict_test<-predict(best_train, mushrooms_test)
+
+
+confusionMatrix(mushrooms_train$class, predict_train$.pred_class, positive="poisonous")
+confusionMatrix(mushrooms_test$class, predict_test$.pred_class, positive="poisonous")
+```
+
+This model shows slight overfitting. The sensitivity (TPR) is also very high. The problem with this model is that it is overly sensitive, so it predicts mushrooms that are not poisonous as poisonous. "Better safe than sorry", though.
+
+
+# Conclusion
+It seems possible to predict if a mushroom is poisonous based on its coloring with good accuracy. Some factors to look at would be gill color or stalk color above or below ring. However, this model would not be very valuable to people who are colorblind.
